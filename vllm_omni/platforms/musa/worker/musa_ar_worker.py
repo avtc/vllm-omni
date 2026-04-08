@@ -46,17 +46,29 @@ class MUSAARWorker(OmniWorkerMixin, OmniGPUWorkerBase):
 
             tp_pp_world_size = self.parallel_config.pipeline_parallel_size * self.parallel_config.tensor_parallel_size
 
-            # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
-            self.local_rank += dp_local_rank * tp_pp_world_size
-            assert self.local_rank < torch.musa.device_count(), (
-                f"DP adjusted local rank {self.local_rank} is out of bounds. "
-            )
             visible_device_count = torch.musa.device_count()
-            assert self.parallel_config.local_world_size <= visible_device_count, (
-                f"local_world_size ({self.parallel_config.local_world_size}) must "
-                f"be less than or equal to the number of visible devices "
-                f"({visible_device_count})."
-            )
+
+            if visible_device_count >= tp_pp_world_size:
+                # All GPUs visible — adjust rank for DP placement.
+                # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
+                self.local_rank += dp_local_rank * tp_pp_world_size
+                assert self.local_rank < visible_device_count, (
+                    f"DP adjusted local rank {self.local_rank} is out of bounds. "
+                )
+                assert self.parallel_config.local_world_size <= visible_device_count, (
+                    f"local_world_size ({self.parallel_config.local_world_size}) must "
+                    f"be less than or equal to the number of visible devices "
+                    f"({visible_device_count})."
+                )
+            elif visible_device_count > 0:
+                # Executor has restricted device visibility per worker,
+                # reset local_rank to 0 (the only visible device).
+                logger.debug(
+                    "visible_device_count (%d) < tp_pp_world_size (%d); "
+                    "executor restricted device visibility, resetting local_rank to 0",
+                    visible_device_count, tp_pp_world_size,
+                )
+                self.local_rank = 0
 
         self.device = torch.device(f"musa:{self.local_rank}")
         torch.musa.set_device(self.device)

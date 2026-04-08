@@ -60,8 +60,15 @@ class GPUARWorker(OmniWorkerMixin, OmniGPUWorkerBase):
                         f"be less than or equal to the number of visible devices "
                         f"({visible_device_count})."
                     )
-                # else: Executor has restricted CUDA_VISIBLE_DEVICES per worker,
-                # trust the executor's GPU assignment.
+                elif visible_device_count > 0:
+                    # Executor has restricted CUDA_VISIBLE_DEVICES per worker,
+                    # reset local_rank to 0 (the only visible device).
+                    logger.debug(
+                        "visible_device_count (%d) < tp_pp_world_size (%d); "
+                        "executor restricted GPU visibility, resetting local_rank to 0",
+                        visible_device_count, tp_pp_world_size,
+                    )
+                    self.local_rank = 0
             self.device = torch.device(f"cuda:{self.local_rank}")
             torch.accelerator.set_device_index(self.device)
 
