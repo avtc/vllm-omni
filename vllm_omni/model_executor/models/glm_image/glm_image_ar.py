@@ -346,7 +346,7 @@ class GlmImageMultiModalProcessor(BaseMultiModalProcessor[GlmImageProcessingInfo
         target_h = mm_kwargs.get("target_h", 1024) if mm_kwargs else 1024
         target_w = mm_kwargs.get("target_w", 1024) if mm_kwargs else 1024
 
-        if not mm_data or not mm_data.get("images"):
+        if not mm_data or not (mm_data.get("images") or mm_data.get("img2img")):
             # Text-to-image mode
             if processor is not None:
                 # Build messages format expected by processor
@@ -371,7 +371,8 @@ class GlmImageMultiModalProcessor(BaseMultiModalProcessor[GlmImageProcessingInfo
 
         # Image-to-image mode
         # NOTE: Use "images" (plural) - this is what vLLM's ImageProcessorItems.get_processor_data() returns
-        images = mm_data.get("images")
+        # Also check "img2img" key which the serving layer uses for image editing requests.
+        images = mm_data.get("images") or mm_data.get("img2img")
         if not isinstance(images, list):
             images = [images]
 
@@ -499,7 +500,8 @@ class GlmImageMultiModalProcessor(BaseMultiModalProcessor[GlmImageProcessingInfo
         image_grid_thw, bypassing apply_chat_template's target handling.
         """
         mm_counts = mm_items.get_all_counts()
-        num_images = mm_counts.get("image", 0)
+        # GLM-Image treats img2img identically to image; count both keys.
+        num_images = mm_counts.get("image", 0) + mm_counts.get("img2img", 0)
 
         if num_images == 0:
             # No images - call parent implementation
@@ -514,8 +516,22 @@ class GlmImageMultiModalProcessor(BaseMultiModalProcessor[GlmImageProcessingInfo
         processor = self.info.get_hf_processor()
         image_processor = processor.image_processor
 
-        # Get images from mm_items
-        images = mm_items.get_items("image", ImageProcessorItems)
+        # Get images from mm_items (check both "image" and "img2img" keys)
+        images = None
+        for key in ("image", "img2img"):
+            try:
+                candidate = mm_items.get_items(key, ImageProcessorItems)
+                if candidate.get_count() > 0:
+                    images = candidate
+                    break
+            except Exception:
+                pass
+        if images is None:
+            return super()._apply_hf_processor_mm_only(
+                mm_items=mm_items,
+                hf_processor_mm_kwargs=hf_processor_mm_kwargs,
+                tokenization_kwargs=tokenization_kwargs,
+            )
         image_list = [images.get(i) for i in range(images.get_count())]
 
         logger.debug(f"_apply_hf_processor_mm_only: processing {len(image_list)} images directly")
@@ -590,7 +606,8 @@ class GlmImageMultiModalProcessor(BaseMultiModalProcessor[GlmImageProcessingInfo
         and return is_update_applied=False so _apply_prompt_updates can expand them.
         """
         mm_counts = mm_items.get_all_counts()
-        num_images = mm_counts.get("image", 0)
+        # GLM-Image treats img2img identically to image; count both keys.
+        num_images = mm_counts.get("image", 0) + mm_counts.get("img2img", 0)
 
         logger.debug(f"_apply_hf_processor_main: mm_counts={mm_counts}, num_images={num_images}")
 
@@ -777,7 +794,9 @@ class GlmImageMultiModalProcessor(BaseMultiModalProcessor[GlmImageProcessingInfo
         For t2i mode (no images), there are no image placeholders to expand.
         """
         # Check if we have images (i2i mode)
-        num_images = mm_items.get_all_counts().get("image", 0)
+        # GLM-Image treats img2img identically to image; count both keys.
+        mm_counts = mm_items.get_all_counts()
+        num_images = mm_counts.get("image", 0) + mm_counts.get("img2img", 0)
         if num_images > 0:
             logger.debug(
                 f"_hf_processor_applies_updates: returning True for i2i mode "
