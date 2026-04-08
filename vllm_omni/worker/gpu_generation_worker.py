@@ -46,17 +46,22 @@ class GPUGenerationWorker(OmniWorkerMixin, OmniGPUWorkerBase):
                     self.parallel_config.pipeline_parallel_size * self.parallel_config.tensor_parallel_size
                 )
 
-                # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
-                self.local_rank += dp_local_rank * tp_pp_world_size
-                assert self.local_rank < torch.accelerator.device_count(), (
-                    f"DP adjusted local rank {self.local_rank} is out of bounds. "
-                )
                 visible_device_count = torch.accelerator.device_count() if torch.cuda.is_available() else 0
-                assert self.parallel_config.local_world_size <= visible_device_count, (
-                    f"local_world_size ({self.parallel_config.local_world_size}) must "
-                    f"be less than or equal to the number of visible devices "
-                    f"({visible_device_count})."
-                )
+
+                if visible_device_count >= tp_pp_world_size:
+                    # All GPUs visible — adjust rank for DP placement.
+                    # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
+                    self.local_rank += dp_local_rank * tp_pp_world_size
+                    assert self.local_rank < visible_device_count, (
+                        f"DP adjusted local rank {self.local_rank} is out of bounds. "
+                    )
+                    assert self.parallel_config.local_world_size <= visible_device_count, (
+                        f"local_world_size ({self.parallel_config.local_world_size}) must "
+                        f"be less than or equal to the number of visible devices "
+                        f"({visible_device_count})."
+                    )
+                # else: Executor has restricted CUDA_VISIBLE_DEVICES per worker,
+                # trust the executor's GPU assignment.
             self.device = torch.device(f"cuda:{self.local_rank}")
             torch.accelerator.set_device_index(self.device)
 
