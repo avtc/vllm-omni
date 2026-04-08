@@ -63,15 +63,6 @@ class MUSAGenerationWorker(OmniWorkerMixin, OmniGPUWorkerBase):
                     f"be less than or equal to the number of visible devices "
                     f"({visible_device_count})."
                 )
-            elif visible_device_count > 0:
-                # Executor has restricted device visibility per worker,
-                # reset local_rank to 0 (the only visible device).
-                logger.debug(
-                    "visible_device_count (%d) < tp_pp_world_size (%d); "
-                    "executor restricted device visibility, resetting local_rank to 0",
-                    visible_device_count, tp_pp_world_size,
-                )
-                self.local_rank = 0
 
         self.device = torch.device(f"musa:{self.local_rank}")
         torch.musa.set_device(self.device)
