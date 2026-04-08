@@ -330,7 +330,7 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
                     try:
                         img_bytes = base64.b64decode(reference_images[0])
                         img = Image.open(BytesIO(img_bytes))
-                        engine_prompt_image = {"img2img": img}
+                        engine_prompt_image = {"image": img}
                         is_img2img = True
                     except Exception:
                         engine_prompt_image = None
